@@ -14,21 +14,15 @@ function isUserKeySane(key) {
 }
 
 const manifestTemplate = {
-   "id": "com.mdblist.lists",
+   "id": "com.linaspurinis.mdblist.stremio",
    "logo": "https://mdblist.com/static/mdblist.png",
-   "version": "0.2.1",
-   "description": "Addon for MDBList custom lists, optionally supports rating posters from RPDB.",
+   "version": "1.0.0",
+   "description": "MDBList custom lists addon with MDBList account integration.",
    "name": "MDBList",
-   "resources": [
-      "catalog",
-   ],
-   "types": [
-      "movie",
-      "series"
-   ],
-   "idPrefixes": [
-      "tt"
-   ],
+   "name": "MDBList",
+   "resources": ["catalog"],
+   "types": ["movie", "series"],
+   "idPrefixes": ["tt"],
    "catalogs": []
 }
 
