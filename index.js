@@ -19,11 +19,14 @@ const manifestTemplate = {
    "version": "1.0.0",
    "description": "MDBList custom lists addon with MDBList account integration.",
    "name": "MDBList",
-   "name": "MDBList",
    "resources": ["catalog"],
    "types": ["movie", "series"],
    "idPrefixes": ["tt"],
-   "catalogs": []
+   "catalogs": [],
+   "stremioAddonsConfig": {
+      "issuer": "https://stremio-addons.net",
+      "signature": "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..y1hDkHJ2bF84nR_5hXW2TA.iU2_49LJ1CeLjK_g9rosE1wq0kKtGpU9MnDrYFfRRBLJW1k5iFxbgqodSDelmT7hGq2vH_3dFEkv52xXTs_1LHWM8F-p7MYqaO-7oYXmxDcsY0wKojOyWCPv5E03x4QW.a6fYp7J1uCDoADLp5trq4w"
+   }
 }
 
 const genres = require('./genres')
