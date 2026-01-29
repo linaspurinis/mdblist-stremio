@@ -207,7 +207,7 @@ function getManifest(req, res, isUnified, isWatchlist, hasSearch) {
 		const user = combined.slice(0, lastHyphenIndex)
 		const mdbListKey = combined.slice(lastHyphenIndex + 1)
 
-		needle.get(`https://api.mdblist.com/lists/${user}/${listId}?apikey=${mdbListKey}`, { follow_max: 3 }, (err, resp, body) => {
+		needle.get(`https://api.mdblist.com/lists/${user}/${encodeURIComponent(listId)}?apikey=${mdbListKey}`, { follow_max: 3 }, (err, resp, body) => {
 				if (!err && resp.statusCode === 200 && isArray(body)) {
 					const listName = body[0].name
 					const types = []
@@ -295,7 +295,7 @@ function getManifest(req, res, isUnified, isWatchlist, hasSearch) {
 			return
 		}
 		if (listIds.length === 1) {
-			needle.get(`https://api.mdblist.com/lists/${listIds[0]}/?apikey=${mdbListKey}`, { follow_max: 3 }, (err, resp, body) => {
+			needle.get(`https://api.mdblist.com/lists/${encodeURIComponent(listIds[0])}/?apikey=${mdbListKey}`, { follow_max: 3 }, (err, resp, body) => {
 				if (!err && resp.statusCode === 200 && isArray(body) && body[0].name) {
 					const types = []
 					if (catalogType) {
@@ -505,7 +505,7 @@ function getExternalList(req, res, isUnified) {
 	const genre = extra.genre;
 	const search = extra.search;
 
-	let url = `https://api.mdblist.com/external/lists/${listId}/items?apikey=${mdbListKey}&limit=${perPage}&offset=${skip}&append_to_response=genre`;
+	let url = `https://api.mdblist.com/external/lists/${encodeURIComponent(listId)}/items?apikey=${mdbListKey}&limit=${perPage}&offset=${skip}&append_to_response=genre`;
 	if (genre) {
 		url += `&filter_genre=${encodeURIComponent(genre.toLowerCase())}`;
 	}
@@ -681,13 +681,13 @@ function getList(req, res, isUnified, isWatchlist) {
 		let url = false
 
 		if (!isUnified) {
-			url = `https://api.mdblist.com/lists/${user}/${listId}/items/${mdbListType}?apikey=${mdbListKey}&limit=${perPage}&offset=${(skip || 0)}&append_to_response=genre`
+			url = `https://api.mdblist.com/lists/${user}/${encodeURIComponent(listId)}/items/${mdbListType}?apikey=${mdbListKey}&limit=${perPage}&offset=${(skip || 0)}&append_to_response=genre`
 			if (genre)
 				url += `&filter_genre=${encodeURIComponent(genre.toLowerCase())}`
 			if (search)
 				url += `&filter_title=${encodeURIComponent(search)}`
 		} else {
-			url = `https://api.mdblist.com/lists/${user}/${listId}/items?apikey=${mdbListKey}&limit=${perPage}&offset=${(skip || 0)}&append_to_response=genre`
+			url = `https://api.mdblist.com/lists/${user}/${encodeURIComponent(listId)}/items?apikey=${mdbListKey}&limit=${perPage}&offset=${(skip || 0)}&append_to_response=genre`
 			if (genre)
 				url += `&filter_genre=${encodeURIComponent(genre.toLowerCase())}`
 			if (search)
@@ -804,7 +804,7 @@ function getList(req, res, isUnified, isWatchlist) {
 		const search = extra.search
 		const type = req.params.type
 		if (listIds.length === 1) {
-			let url = `https://api.mdblist.com/lists/${listIds[0]}/items/?apikey=${mdbListKey}&limit=${perPage}&offset=${(skip || 0)}&append_to_response=genre`
+			let url = `https://api.mdblist.com/lists/${encodeURIComponent(listIds[0])}/items/?apikey=${mdbListKey}&limit=${perPage}&offset=${(skip || 0)}&append_to_response=genre`
 			if (genre)
 				url += `&filter_genre=${encodeURIComponent(genre.toLowerCase())}`
 			if (search)
