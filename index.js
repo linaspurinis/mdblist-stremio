@@ -202,8 +202,10 @@ function getManifest(req, res, isUnified, isWatchlist, hasSearch) {
 		res.json(manifestClone)
 	} else if (req.params.mdbListKey.startsWith(`userapi-`)) {
 		const listId = req.params.listIds
-		const user = req.params.mdbListKey.replace('userapi-', '').split('-')[0]
-		const mdbListKey = req.params.mdbListKey.replace('userapi-', '').split('-')[1]
+		const combined = req.params.mdbListKey.replace('userapi-', '')
+		const lastHyphenIndex = combined.lastIndexOf('-')
+		const user = combined.slice(0, lastHyphenIndex)
+		const mdbListKey = combined.slice(lastHyphenIndex + 1)
 
 		needle.get(`https://api.mdblist.com/lists/${user}/${listId}?apikey=${mdbListKey}`, { follow_max: 3 }, (err, resp, body) => {
 				if (!err && resp.statusCode === 200 && isArray(body)) {
@@ -652,12 +654,14 @@ function getList(req, res, isUnified, isWatchlist) {
 			res.status(500).send('Invalid mDBList list slug')
 			return
 		}
-		const user = req.params.mdbListKey.replace('userapi-', '').split('-')[0]
+		const combined = req.params.mdbListKey.replace('userapi-', '')
+		const lastHyphenIndex = combined.lastIndexOf('-')
+		const user = combined.slice(0, lastHyphenIndex)
 		if (!user) {
 			res.status(500).send('Invalid mDBList list user')
 			return
 		}
-		const mdbListKey = req.params.mdbListKey.replace('userapi-', '').split('-')[1]
+		const mdbListKey = combined.slice(lastHyphenIndex + 1)
 		if (!mdbListKey) {
 			res.status(500).send('Invalid mDBList Key')
 			return
