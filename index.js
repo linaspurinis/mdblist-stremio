@@ -55,6 +55,18 @@ const isArray = (body) => {
 	return Array.isArray(body) && body.length
 }
 
+function safeCallback(res, cb) {
+	return function(err, resp, body) {
+		try {
+			cb(err, resp, body)
+		} catch(e) {
+			console.error('Unexpected error processing response:', e)
+			if (!res.headersSent)
+				res.status(500).send('Internal Server Error')
+		}
+	}
+}
+
 app.get('/manifest.json', (req, res) => {
 	const manifestClone = JSON.parse(JSON.stringify(manifestTemplate))
 	if (!manifestClone.behaviorHints)
@@ -98,10 +110,10 @@ function getExternalManifest(req, res, isUnified, hasSearch) {
 		return;
 	}
 
-	needle.get(`https://api.mdblist.com/external/lists/user?apikey=${mdbListKey}`, { follow_max: 3 }, (err, resp, body) => {
+	needle.get(`https://api.mdblist.com/external/lists/user?apikey=${mdbListKey}`, { follow_max: 3 }, safeCallback(res, (err, resp, body) => {
 		if (!err && resp.statusCode === 200 && isArray(body)) {
 			const extList = body.find(el => {
-				return el.id === parseInt(listId)
+				return el && el.id === parseInt(listId)
 			})
 			if (!extList) {
 				res.status(500).send('Could not find an external list with this id for this mdblist account');
@@ -146,7 +158,7 @@ function getExternalManifest(req, res, isUnified, hasSearch) {
 		} else {
 			res.status(500).send('Error from mDBList External API');
 		}
-	});
+	}));
 }
 
 // New route for external manifest
@@ -210,8 +222,8 @@ function getManifest(req, res, isUnified, isWatchlist, hasSearch) {
 		const user = combined.slice(0, lastHyphenIndex)
 		const mdbListKey = combined.slice(lastHyphenIndex + 1)
 
-		needle.get(`https://api.mdblist.com/lists/${user}/${encodeURIComponent(listId)}?apikey=${mdbListKey}`, { follow_max: 3 }, (err, resp, body) => {
-				if (!err && resp.statusCode === 200 && isArray(body)) {
+		needle.get(`https://api.mdblist.com/lists/${user}/${encodeURIComponent(listId)}?apikey=${mdbListKey}`, { follow_max: 3 }, safeCallback(res, (err, resp, body) => {
+				if (!err && resp.statusCode === 200 && isArray(body) && body[0]) {
 					const listName = body[0].name
 					const types = []
 					if (catalogType) {
@@ -259,7 +271,7 @@ function getManifest(req, res, isUnified, isWatchlist, hasSearch) {
 					}
 				}
 				res.status(500).send('Error from mDBList API')
-		})
+		}))
 	} else if (req.params.mdbListKey === `user-${demos.username}`) {
 		const listId = req.params.listIds
 		const list = demos.lists.find(el => el.id === listId)
@@ -298,8 +310,8 @@ function getManifest(req, res, isUnified, isWatchlist, hasSearch) {
 			return
 		}
 		if (listIds.length === 1) {
-			needle.get(`https://api.mdblist.com/lists/${encodeURIComponent(listIds[0])}/?apikey=${mdbListKey}`, { follow_max: 3 }, (err, resp, body) => {
-				if (!err && resp.statusCode === 200 && isArray(body) && body[0].name) {
+			needle.get(`https://api.mdblist.com/lists/${encodeURIComponent(listIds[0])}/?apikey=${mdbListKey}`, { follow_max: 3 }, safeCallback(res, (err, resp, body) => {
+				if (!err && resp.statusCode === 200 && isArray(body) && body[0] && body[0].name) {
 					const types = []
 					if (catalogType) {
 						types.push(catalogType)
@@ -345,7 +357,7 @@ function getManifest(req, res, isUnified, isWatchlist, hasSearch) {
 				} else {
 					res.status(500).send('Error from mDBList API')
 				}
-			})
+			}))
 		} else {
 			res.status(500).send('Too many list IDs')
 		}
@@ -409,80 +421,92 @@ function hasImdbId(obj) {
 function getCinemetaForIds(type, ids, cb) {
 	const imdbIds = ids.join(',')
 	needle.get(`https://v3-cinemeta.strem.io/catalog/${type}/last-videos/lastVideosIds=${imdbIds}.json`, (err, resp, body) => {
-		cb(((body || {}).metasDetailed || []).filter(el => !!el))
+		try {
+			cb(((body || {}).metasDetailed || []).filter(el => !!el))
+		} catch(e) {
+			console.error('Unexpected error in cinemeta callback:', e)
+			cb([])
+		}
 	})
 }
 
 const perPage = 100
 
 function unifiedList(req, res, mdbBody, userKey) {
-	if (isArray(mdbBody) && mdbBody[0].title) {
-		let firstType = 'movie'
-		let items1 = mdbBody.filter(el => el.mediatype === 'movie').filter(hasImdbId)
-		let items2 = mdbBody.filter(el => el.mediatype === 'show').filter(hasImdbId)
-		if (!items1.length && !items2.length) {
-			res.json({ metas: [] });
-			return
-		}
-		if (!items1.length && items2.length) {
-			items1 = JSON.parse(JSON.stringify(items2))
-			items2 = []
-			firstType = 'series'
-		}
-		items1 = items1.map(mdbToStremio.bind(null, userKey)).filter(Boolean);
-		items2 = items2.map(mdbToStremio.bind(null, userKey)).filter(Boolean);
-		function orderList(metasDetailed) {
-			const newList = []
-			mdbBody.filter(hasImdbId).map(mdbToStremio.bind(null, userKey)).filter(Boolean).forEach(el => {
-				const item = metasDetailed.find(elm => elm.id === el.id)
-				if (item) {
-					newList.push(item)
-				} else {
-					newList.push(el)
-				}
-			})
-			res.json({
-				metas: newList.map((el, ij) => {
-					el = el || items[ij];
-					if (el.id && el.id.startsWith('tt') && userKey) {
-						el.poster = `https://api.ratingposterdb.com/${userKey}/imdb/poster-default/${el.id}.jpg?fallback=true`;
-					}
-					return el;
-				})
-			});
-		}
-		if (!items1.length) {
-			if (items2.length) {
-				getCinemetaForIds('series', items2.map(el => el.imdb_id), (metasDetailed2) => {
-					let metasDetailed = []
-					if (metasDetailed2 && metasDetailed2.length) {
-						metasDetailed = metasDetailed.concat(metasDetailed2)
-					}
-					orderList(metasDetailed)
-				})
-			} else {
-				orderList([])
+	try {
+		if (isArray(mdbBody) && mdbBody[0] && mdbBody[0].title) {
+			let firstType = 'movie'
+			let items1 = mdbBody.filter(el => el && el.mediatype === 'movie').filter(hasImdbId)
+			let items2 = mdbBody.filter(el => el && el.mediatype === 'show').filter(hasImdbId)
+			if (!items1.length && !items2.length) {
+				res.json({ metas: [] });
+				return
 			}
-		} else {
-			getCinemetaForIds(firstType, items1.map(el => el.imdb_id), (metasDetailed1) => {
+			if (!items1.length && items2.length) {
+				items1 = JSON.parse(JSON.stringify(items2))
+				items2 = []
+				firstType = 'series'
+			}
+			items1 = items1.map(mdbToStremio.bind(null, userKey)).filter(Boolean);
+			items2 = items2.map(mdbToStremio.bind(null, userKey)).filter(Boolean);
+			function orderList(metasDetailed) {
+				const newList = []
+				const fallbackItems = mdbBody.filter(hasImdbId).map(mdbToStremio.bind(null, userKey)).filter(Boolean)
+				fallbackItems.forEach(el => {
+					const item = metasDetailed.find(elm => elm.id === el.id)
+					if (item) {
+						newList.push(item)
+					} else {
+						newList.push(el)
+					}
+				})
+				res.json({
+					metas: newList.map((el, ij) => {
+						el = el || fallbackItems[ij];
+						if (el && el.id && el.id.startsWith('tt') && userKey) {
+							el.poster = `https://api.ratingposterdb.com/${userKey}/imdb/poster-default/${el.id}.jpg?fallback=true`;
+						}
+						return el;
+					}).filter(Boolean)
+				});
+			}
+			if (!items1.length) {
 				if (items2.length) {
 					getCinemetaForIds('series', items2.map(el => el.imdb_id), (metasDetailed2) => {
 						let metasDetailed = []
-						if (metasDetailed1 && metasDetailed1.length) {
-							metasDetailed = metasDetailed.concat(metasDetailed1)
-						}
 						if (metasDetailed2 && metasDetailed2.length) {
 							metasDetailed = metasDetailed.concat(metasDetailed2)
 						}
 						orderList(metasDetailed)
 					})
 				} else {
-					orderList(metasDetailed1 || [])
+					orderList([])
 				}
-			})
+			} else {
+				getCinemetaForIds(firstType, items1.map(el => el.imdb_id), (metasDetailed1) => {
+					if (items2.length) {
+						getCinemetaForIds('series', items2.map(el => el.imdb_id), (metasDetailed2) => {
+							let metasDetailed = []
+							if (metasDetailed1 && metasDetailed1.length) {
+								metasDetailed = metasDetailed.concat(metasDetailed1)
+							}
+							if (metasDetailed2 && metasDetailed2.length) {
+								metasDetailed = metasDetailed.concat(metasDetailed2)
+							}
+							orderList(metasDetailed)
+						})
+					} else {
+						orderList(metasDetailed1 || [])
+					}
+				})
+			}
+		} else {
+			res.json({ metas: [] });
 		}
-	} else {
-		res.json({ metas: [] });
+	} catch(e) {
+		console.error('Unexpected error in unifiedList:', e)
+		if (!res.headersSent)
+			res.status(500).send('Internal Server Error')
 	}
 }
 
@@ -518,7 +542,7 @@ function getExternalList(req, res, isUnified) {
 	if (isUnified) {
 		url += `&unified=true`
 	}
-	needle.get(url, { follow_max: 3 }, (err, resp, mdbBody) => {
+	needle.get(url, { follow_max: 3 }, safeCallback(res, (err, resp, mdbBody) => {
 		if (!err && resp.statusCode === 200) {
 			if (isUnified) {
 				unifiedList(req, res, mdbBody, userKey)
@@ -526,7 +550,7 @@ function getExternalList(req, res, isUnified) {
 			} else {
 				const mdbType = type === 'movie' ? 'movies' : 'shows';
 				const body = ((mdbBody || {})[mdbType] || []).length ? mdbBody[mdbType] : mdbBody; // Fallback to raw body if no movies/shows key
-				if (isArray(body) && body[0].title) {
+				if (isArray(body) && body[0] && body[0].title) {
 					res.setHeader('Cache-Control', `public, max-age=${1 * 60 * 60}`);
 					const items = body.filter(hasImdbId).map(mdbToStremio.bind(null, userKey)).filter(Boolean);
 					if (!items.length) {
@@ -538,11 +562,11 @@ function getExternalList(req, res, isUnified) {
 							res.json({
 								metas: metasDetailed.map((el, ij) => {
 									el = el || items[ij];
-									if (el.id && el.id.startsWith('tt') && userKey) {
+									if (el && el.id && el.id.startsWith('tt') && userKey) {
 										el.poster = `https://api.ratingposterdb.com/${userKey}/imdb/poster-default/${el.id}.jpg?fallback=true`;
 									}
 									return el;
-								})
+								}).filter(Boolean)
 							});
 						} else {
 							res.json({ metas: items });
@@ -555,7 +579,7 @@ function getExternalList(req, res, isUnified) {
 		} else {
 			res.status(500).send('Error from mDBList External API');
 		}
-	});
+	}));
 }
 
 app.get('/unified-external/:listIds/:mdbListKey/:catalogType/:userKey?/catalog/:type/:slug/:extra?.json', (req, res) => {
@@ -610,15 +634,15 @@ function getList(req, res, isUnified, isWatchlist) {
 			url += `&unified=true`
 		}
 
-		needle.get(url, { follow_max: 3 }, (err, resp, mdbBody) => {
+		needle.get(url, { follow_max: 3 }, safeCallback(res, (err, resp, mdbBody) => {
 			if (!err && resp.statusCode === 200) {
 				if (isUnified) {
 					unifiedList(req, res, mdbBody, userKey)
 					return;
 				}
 				const mdbType = type === 'movie' ? 'movies' : 'shows'
-				body = (mdbBody || {})[mdbType]
-				if (isArray(body) && body[0].title) {
+				const body = (mdbBody || {})[mdbType]
+				if (isArray(body) && body[0] && body[0].title) {
 					res.setHeader('Cache-Control', `public, max-age=${1 * 60 * 60}`)
 					const items = body.filter(hasImdbId).map(mdbToStremio.bind(null, userKey)).filter(Boolean)
 					if (!items.length) {
@@ -630,10 +654,10 @@ function getList(req, res, isUnified, isWatchlist) {
 							res.json({
 								metas: metasDetailed.map((el, ij) => {
 									el = el || items[ij]
-									if (el.id && el.id.startsWith('tt') && userKey)
+									if (el && el.id && el.id.startsWith('tt') && userKey)
 										el.poster = `https://api.ratingposterdb.com/${userKey}/imdb/poster-default/${el.id}.jpg?fallback=true`
 									return el
-								})
+								}).filter(Boolean)
 							})
 						} else {
 							res.json({
@@ -649,7 +673,7 @@ function getList(req, res, isUnified, isWatchlist) {
 			} else {
 				res.status(500).send('Error from mDBList API')
 			}
-		})
+		}))
 
 	} else if (req.params.mdbListKey.startsWith(`userapi-`)) {
 		const listId = req.params.listIds
@@ -698,15 +722,15 @@ function getList(req, res, isUnified, isWatchlist) {
 			url += `&unified=true`
 		}
 
-		needle.get(url, { follow_max: 3 }, (err, resp, mdbBody) => {
+		needle.get(url, { follow_max: 3 }, safeCallback(res, (err, resp, mdbBody) => {
 			if (!err && resp.statusCode === 200) {
 				if (isUnified) {
 					unifiedList(req, res, mdbBody, userKey)
 					return;
 				}
 				const mdbType = type === 'movie' ? 'movies' : 'shows'
-				body = (mdbBody || {})[mdbType]
-				if (isArray(body) && body[0].title) {
+				const body = (mdbBody || {})[mdbType]
+				if (isArray(body) && body[0] && body[0].title) {
 					res.setHeader('Cache-Control', `public, max-age=${1 * 60 * 60}`)
 					const items = body.filter(hasImdbId).map(mdbToStremio.bind(null, userKey)).filter(Boolean)
 					if (!items.length) {
@@ -718,10 +742,10 @@ function getList(req, res, isUnified, isWatchlist) {
 							res.json({
 								metas: metasDetailed.map((el, ij) => {
 									el = el || items[ij]
-									if (el.id && el.id.startsWith('tt') && userKey)
+									if (el && el.id && el.id.startsWith('tt') && userKey)
 										el.poster = `https://api.ratingposterdb.com/${userKey}/imdb/poster-default/${el.id}.jpg?fallback=true`
 									return el
-								})
+								}).filter(Boolean)
 							})
 						} else {
 							res.json({
@@ -737,14 +761,14 @@ function getList(req, res, isUnified, isWatchlist) {
 			} else {
 				res.status(500).send('Error from mDBList API')
 			}
-		})
+		}))
 
 	} else if (req.params.mdbListKey === `user-${demos.username}`) {
 		const listId = req.params.listIds
 		const extra = req.params.extra ? qs.parse(req.url.split('/').pop().slice(0, -5)) : {}
 		const skip = parseInt(extra.skip || 0)
 		const type = req.params.type
-		const url = `https://mdblist.com/lists/${demos.username}/${listId}/json?limit=${perPage}&offset=${(skip || 0)}`
+		let url = `https://mdblist.com/lists/${demos.username}/${listId}/json?limit=${perPage}&offset=${(skip || 0)}`
 		if (isUnified) {
 			url += `&unified=true`
 		}
@@ -753,8 +777,8 @@ function getList(req, res, isUnified, isWatchlist) {
 			res.status(500).send('Invalid RPDB Key')
 			return
 		}
-		needle.get(url, { follow_max: 3 }, (err, resp, body) => {
-			if (!err && resp.statusCode === 200 && isArray(body) && body[0].title) {
+		needle.get(url, { follow_max: 3 }, safeCallback(res, (err, resp, body) => {
+			if (!err && resp.statusCode === 200 && isArray(body) && body[0] && body[0].title) {
 				if (isUnified) {
 					unifiedList(req, res, body, userKey)
 					return;
@@ -770,10 +794,10 @@ function getList(req, res, isUnified, isWatchlist) {
 						res.json({
 							metas: metasDetailed.map((el, ij) => {
 								el = el || items[ij]
-								if (el.id && el.id.startsWith('tt') && userKey)
+								if (el && el.id && el.id.startsWith('tt') && userKey)
 									el.poster = `https://api.ratingposterdb.com/${userKey}/imdb/poster-default/${el.id}.jpg?fallback=true`
 								return el
-							})
+							}).filter(Boolean)
 						})
 					} else {
 						res.json({
@@ -784,7 +808,7 @@ function getList(req, res, isUnified, isWatchlist) {
 			} else {
 				res.status(500).send('Error from mDBList API')
 			}
-		})
+		}))
 	} else {
 		const listIds = (req.params.listIds || '').split(',')
 		if (!listIds.length) {
@@ -815,15 +839,15 @@ function getList(req, res, isUnified, isWatchlist) {
 			if (isUnified) {
 				url += `&unified=true`
 			}
-			needle.get(url, { follow_max: 3 }, (err, resp, mdbBody) => {
+			needle.get(url, { follow_max: 3 }, safeCallback(res, (err, resp, mdbBody) => {
 				if (!err && resp.statusCode === 200) {
 					if (isUnified) {
 						unifiedList(req, res, mdbBody, userKey)
 						return;
 					}
 					const mdbType = type === 'movie' ? 'movies' : 'shows'
-					body = (mdbBody || {})[mdbType]
-					if (isArray(body) && body[0].title) {
+					const body = (mdbBody || {})[mdbType]
+					if (isArray(body) && body[0] && body[0].title) {
 						res.setHeader('Cache-Control', `public, max-age=${1 * 60 * 60}`)
 						const items = body.filter(hasImdbId).map(mdbToStremio.bind(null, userKey)).filter(Boolean)
 						if (!items.length) {
@@ -836,10 +860,10 @@ function getList(req, res, isUnified, isWatchlist) {
 								res.json({
 									metas: metasDetailed.map((el, ij) => {
 										el = el || items[ij]
-										if (el.id && el.id.startsWith('tt') && userKey)
+										if (el && el.id && el.id.startsWith('tt') && userKey)
 											el.poster = `https://api.ratingposterdb.com/${userKey}/imdb/poster-default/${el.id}.jpg?fallback=true`
 										return el
-									})
+									}).filter(Boolean)
 								})
 							} else {
 								res.json({
@@ -855,7 +879,7 @@ function getList(req, res, isUnified, isWatchlist) {
 				} else {
 					res.status(500).send('Error from mDBList API')
 				}
-			})
+			}))
 		} else {
 			res.status(500).send('Too many list IDs')
 		}
@@ -894,8 +918,22 @@ app.get('/:listIds/:mdbListKey/:userKey?/catalog/:type/:slug/:extra?.json', (req
 	getList(req, res, false, false)
 })
 
+app.use((err, req, res, _next) => {
+	console.error('Express error:', err)
+	if (!res.headersSent)
+		res.status(500).send('Internal Server Error')
+})
+
+process.on('uncaughtException', (err) => {
+	console.error('Uncaught Exception:', err)
+})
+
+process.on('unhandledRejection', (err) => {
+	console.error('Unhandled Rejection:', err)
+})
+
 const port = process.env.PORT || 64321
 
 app.listen(port, () => {
-	console.log(`http://localhost:${port}/manifest.json`)	
+	console.log(`http://localhost:${port}/manifest.json`)
 })
