@@ -16,7 +16,7 @@ function isUserKeySane(key) {
 const manifestTemplate = {
    "id": "com.linaspurinis.mdblist.stremio",
    "logo": "https://mdblist.com/static/mdblist.png",
-   "version": "1.0.0",
+   "version": "1.0.1",
    "description": "MDBList custom lists addon with MDBList account integration.",
    "name": "MDBList",
    "resources": ["catalog"],
